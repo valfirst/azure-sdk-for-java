@@ -17,6 +17,7 @@ import java.nio.channels.Pipe;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * {@link Reactor} is not thread-safe - all calls to {@link Proton} APIs should be on the Reactor Thread.
@@ -42,6 +43,7 @@ public final class ReactorDispatcher {
     private final Pipe ioSignal;
     private final ConcurrentLinkedQueue<Work> workQueue;
     private final WorkScheduler workScheduler;
+    private final AtomicBoolean dequeueInProgress = new AtomicBoolean();
 
     public ReactorDispatcher(final Reactor reactor) throws IOException {
         this.reactor = reactor;
@@ -95,6 +97,10 @@ public final class ReactorDispatcher {
     }
 
     private void signalWorkQueue() throws IOException {
+        if (this.dequeueInProgress.get()) {
+            return;
+        }
+
         try {
             ByteBuffer oneByteBuffer = ByteBuffer.allocate(1);
             while (this.ioSignal.sink().write(oneByteBuffer) == 0) {
@@ -109,6 +115,11 @@ public final class ReactorDispatcher {
     private final class WorkScheduler implements Callback {
         @Override
         public void run(Selectable selectable) {
+            // There is already a dequeue in progress, return.
+            if (ReactorDispatcher.this.dequeueInProgress.getAndSet(true)) {
+                return;
+            }
+
             try {
                 ByteBuffer oneKbByteBuffer = ByteBuffer.allocate(1024);
                 while (ioSignal.source().read(oneKbByteBuffer) > 0) {
@@ -116,19 +127,25 @@ public final class ReactorDispatcher {
                     oneKbByteBuffer = ByteBuffer.allocate(1024);
                 }
             } catch (ClosedChannelException ignorePipeClosedDuringReactorShutdown) {
-                logger.info("WorkScheduler.run() failed with an error: %s", ignorePipeClosedDuringReactorShutdown);
+                logger.info("WorkScheduler.run() failed with an exception. Ignored during reactor shutdown.",
+                    ignorePipeClosedDuringReactorShutdown);
             } catch (IOException ioException) {
-                logger.error("WorkScheduler.run() failed with an error: %s", ioException);
-                throw logger.logExceptionAsError(new RuntimeException(ioException));
+                ReactorDispatcher.this.dequeueInProgress.set(false);
+                throw logger.logExceptionAsError(new RuntimeException("WorkScheduler.run() failed with an IOException",
+                    ioException));
             }
 
-            Work topWork;
-            while ((topWork = workQueue.poll()) != null) {
-                if (topWork.delay != null) {
-                    reactor.schedule((int) topWork.delay.toMillis(), topWork.dispatchHandler);
-                } else {
-                    topWork.dispatchHandler.onTimerTask(null);
+            try {
+                Work topWork;
+                while ((topWork = workQueue.poll()) != null) {
+                    if (topWork.delay != null) {
+                        reactor.schedule((int) topWork.delay.toMillis(), topWork.dispatchHandler);
+                    } else {
+                        topWork.dispatchHandler.onTimerTask(null);
+                    }
                 }
+            } finally {
+                ReactorDispatcher.this.dequeueInProgress.set(false);
             }
         }
     }
@@ -138,12 +155,13 @@ public final class ReactorDispatcher {
 
         @Override
         public void run(Selectable selectable) {
+            logger.verbose("Closing IO sink.");
             try {
                 if (ioSignal.sink().isOpen()) {
                     ioSignal.sink().close();
                 }
             } catch (IOException ioException) {
-                logger.error("CloseHandler.run() sink().close() failed with an error. %s", ioException);
+                logger.error("CloseHandler.run() sink().close() failed with an error.", ioException);
             }
 
             workScheduler.run(null);
@@ -153,7 +171,7 @@ public final class ReactorDispatcher {
                     ioSignal.source().close();
                 }
             } catch (IOException ioException) {
-                logger.error("CloseHandler.run() source().close() failed with an error %s", ioException);
+                logger.error("CloseHandler.run() source().close() failed with an error.", ioException);
             }
         }
     }

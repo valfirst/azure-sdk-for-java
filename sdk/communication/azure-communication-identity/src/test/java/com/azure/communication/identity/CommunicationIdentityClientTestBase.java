@@ -64,6 +64,19 @@ public class CommunicationIdentityClientTestBase extends TestBase {
         return builder;
     }
 
+    //Helper method
+    private static HttpPipeline setupPipeline(HttpClient httpClient) {
+        List<HttpPipelinePolicy> policies = new ArrayList<>();
+        HttpLogOptions httpLogOptions = new HttpLogOptions().setLogLevel(HttpLogDetailLevel.BODY_AND_HEADERS);
+        HttpPolicyProviders.addBeforeRetryPolicies(policies);
+        policies.add(new RetryPolicy());
+        HttpPolicyProviders.addAfterRetryPolicies(policies);
+        policies.add(new HttpLoggingPolicy(httpLogOptions));
+        
+        return new HttpPipelineBuilder().httpClient(httpClient)
+            .policies(policies.toArray(new HttpPipelinePolicy[0])).build();
+    }
+
     protected CommunicationIdentityClientBuilder getCommunicationIdentityClientBuilderUsingManagedIdentity(HttpClient httpClient) {
         CommunicationIdentityClientBuilder builder = new CommunicationIdentityClientBuilder();
         builder
@@ -73,7 +86,7 @@ public class CommunicationIdentityClientTestBase extends TestBase {
         if (getTestMode() == TestMode.PLAYBACK) {
             builder.credential(new FakeCredentials());
         } else {
-            builder.credential(new DefaultAzureCredentialBuilder().authorityHost("https://login.windows-ppe.net").build());
+            builder.credential(new DefaultAzureCredentialBuilder().authorityHost("https://login.windows-ppe.net").httpPipeline(setupPipeline(HttpClient.createDefault())).build());
         }
 
         if (getTestMode() == TestMode.RECORD) {

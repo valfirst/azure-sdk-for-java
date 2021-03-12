@@ -18,6 +18,7 @@ import reactor.core.publisher.Operators;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
@@ -40,6 +41,7 @@ public class AmqpChannelProcessor<T> extends Mono<T> implements Processor<T, T>,
     private final String fullyQualifiedNamespace;
     private final String entityPath;
     private final Function<T, Flux<AmqpEndpointState>> endpointStatesFunction;
+    private final Duration operationTimeout;
 
     private volatile Subscription upstream;
     private volatile ConcurrentLinkedDeque<ChannelSubscriber<T>> subscribers = new ConcurrentLinkedDeque<>();
@@ -49,7 +51,8 @@ public class AmqpChannelProcessor<T> extends Mono<T> implements Processor<T, T>,
     private volatile Disposable retrySubscription;
 
     public AmqpChannelProcessor(String fullyQualifiedNamespace, String entityPath,
-        Function<T, Flux<AmqpEndpointState>> endpointStatesFunction, AmqpRetryPolicy retryPolicy, ClientLogger logger) {
+        Function<T, Flux<AmqpEndpointState>> endpointStatesFunction, AmqpRetryPolicy retryPolicy,
+        ClientLogger logger) {
         this.fullyQualifiedNamespace = Objects
             .requireNonNull(fullyQualifiedNamespace, "'fullyQualifiedNamespace' cannot be null.");
         this.entityPath = Objects.requireNonNull(entityPath, "'entityPath' cannot be null.");
@@ -57,6 +60,8 @@ public class AmqpChannelProcessor<T> extends Mono<T> implements Processor<T, T>,
             "'endpointStates' cannot be null.");
         this.retryPolicy = Objects.requireNonNull(retryPolicy, "'retryPolicy' cannot be null.");
         this.logger = Objects.requireNonNull(logger, "'logger' cannot be null.");
+
+        this.operationTimeout = this.retryPolicy.getRetryOptions().getTryTimeout();
     }
 
     @Override
@@ -83,22 +88,13 @@ public class AmqpChannelProcessor<T> extends Mono<T> implements Processor<T, T>,
             oldSubscription = connectionSubscription;
 
             currentChannel = amqpChannel;
-
-            final ConcurrentLinkedDeque<ChannelSubscriber<T>> currentSubscribers = subscribers;
-            logger.info("namespace[{}] entityPath[{}]: Next AMQP channel received, updating {} current "
-                + "subscribers", fullyQualifiedNamespace, entityPath, subscribers.size());
-
-            currentSubscribers.forEach(subscription -> subscription.onNext(amqpChannel));
-
-            connectionSubscription = endpointStatesFunction.apply(amqpChannel).subscribe(
-                state -> {
-                    // Connection was successfully opened, we can reset the retry interval.
-                    if (state == AmqpEndpointState.ACTIVE) {
-                        retryAttempts.set(0);
-                        logger.info("namespace[{}] entityPath[{}]: Channel is now active.",
-                            fullyQualifiedNamespace, entityPath);
-                    }
-                },
+            connectionSubscription = endpointStatesFunction.apply(amqpChannel)
+                .filter(x -> x == AmqpEndpointState.ACTIVE)
+                .timeout(Mono.delay(operationTimeout), state -> Flux.never(),
+                    Mono.error(new TimeoutException("Timeout elapsed waiting for active connection state. Timeout:"
+                        + operationTimeout)))
+                .subscribe(
+                state -> onChannelState(state, amqpChannel),
                 error -> {
                     setAndClearChannel();
                     onError(error);
@@ -260,6 +256,28 @@ public class AmqpChannelProcessor<T> extends Mono<T> implements Processor<T, T>,
     @Override
     public boolean isDisposed() {
         return isDisposed.get();
+    }
+
+    private void onChannelState(AmqpEndpointState state, T channel) {
+        // Connection was successfully opened, we can reset the retry interval.
+        if (state == AmqpEndpointState.ACTIVE) {
+            retryAttempts.set(0);
+            logger.info("namespace[{}] entityPath[{}]: Channel is now active.",
+                fullyQualifiedNamespace, entityPath);
+        }
+
+        synchronized (lock) {
+            if (this.currentChannel != channel) {
+                logger.warning("Current channel is no longer the channel passed.");
+                return;
+            }
+
+            final ConcurrentLinkedDeque<ChannelSubscriber<T>> currentSubscribers = subscribers;
+            logger.info("namespace[{}] entityPath[{}]: Next AMQP channel received, updating {} current "
+                + "subscribers", fullyQualifiedNamespace, entityPath, subscribers.size());
+
+            currentSubscribers.forEach(subscription -> subscription.onNext(channel));
+        }
     }
 
     private void requestUpstream() {

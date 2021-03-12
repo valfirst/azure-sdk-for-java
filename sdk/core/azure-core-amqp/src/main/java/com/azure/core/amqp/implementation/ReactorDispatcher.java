@@ -136,16 +136,23 @@ public final class ReactorDispatcher {
             }
 
             try {
-                Work topWork;
-                while ((topWork = workQueue.poll()) != null) {
-                    if (topWork.delay != null) {
-                        reactor.schedule((int) topWork.delay.toMillis(), topWork.dispatchHandler);
-                    } else {
-                        topWork.dispatchHandler.onTimerTask(null);
-                    }
-                }
+                drainQueue();
             } finally {
                 ReactorDispatcher.this.dequeueInProgress.set(false);
+            }
+
+            // drain items to make sure there are no pending items
+            drainQueue();
+        }
+
+        private void drainQueue() {
+            Work topWork;
+            while ((topWork = workQueue.poll()) != null) {
+                if (topWork.delay != null) {
+                    reactor.schedule((int) topWork.delay.toMillis(), topWork.dispatchHandler);
+                } else {
+                    topWork.dispatchHandler.onTimerTask(null);
+                }
             }
         }
     }

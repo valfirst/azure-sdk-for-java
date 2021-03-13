@@ -3,6 +3,7 @@
 
 package com.azure.core.amqp.implementation;
 
+import com.azure.core.amqp.AmqpConnection;
 import com.azure.core.amqp.AmqpRetryOptions;
 import com.azure.core.amqp.exception.AmqpErrorContext;
 import com.azure.core.amqp.exception.AmqpException;
@@ -77,6 +78,8 @@ class RequestResponseChannelTest {
     private ReceiveLinkHandler receiveLinkHandler;
     @Mock
     private SendLinkHandler sendLinkHandler;
+    @Mock
+    private AmqpConnection amqpConnection;
 
     @Mock
     private Session session;
@@ -142,7 +145,7 @@ class RequestResponseChannelTest {
         when(receiveLinkHandler.getErrorContext(receiver)).thenReturn(expected);
 
         // Act
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, settleMode,
             receiverSettleMode);
         final AmqpErrorContext errorContext = channel.getErrorContext();
@@ -163,7 +166,7 @@ class RequestResponseChannelTest {
     @Test
     void disposes() {
         // Arrange
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
 
@@ -181,7 +184,7 @@ class RequestResponseChannelTest {
     @Test
     void sendNull() {
         // Arrange
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
 
@@ -197,7 +200,7 @@ class RequestResponseChannelTest {
     @Test
     void sendReplyToSet() {
         // Arrange
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
         final Message message = mock(Message.class);
@@ -215,7 +218,7 @@ class RequestResponseChannelTest {
     @Test
     void sendMessageIdSet() {
         // Arrange
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
         final Message message = mock(Message.class);
@@ -240,7 +243,7 @@ class RequestResponseChannelTest {
             64, 64, 0, 83, 116, -63, 49, 4, -95, 11, 115, 116, 97, 116, 117, 115, 45, 99, 111, 100, 101, 113, 0, 0, 0,
             -54, -95, 18, 115, 116, 97, 116, 117, 115, 45, 100, 101, 115, 99, 114, 105, 112, 116, 105, 111, 110, -95, 8,
             65, 99, 99, 101, 112, 116, 101, 100};
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
         final UnsignedLong messageId = UnsignedLong.valueOf(1);
@@ -300,7 +303,7 @@ class RequestResponseChannelTest {
             64, 64, 0, 83, 116, -63, 49, 4, -95, 11, 115, 116, 97, 116, 117, 115, 45, 99, 111, 100, 101, 113, 0, 0, 0,
             -54, -95, 18, 115, 116, 97, 116, 117, 115, 45, 100, 101, 115, 99, 114, 105, 112, 116, 105, 111, 110, -95, 8,
             65, 99, 99, 101, 112, 116, 101, 100};
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
         final UnsignedLong messageId = UnsignedLong.valueOf(1);
@@ -350,7 +353,7 @@ class RequestResponseChannelTest {
     @Test
     void clearMessagesOnError() {
         // Arrange
-        final RequestResponseChannel channel = new RequestResponseChannel(CONNECTION_ID, NAMESPACE, LINK_NAME,
+        final RequestResponseChannel channel = new RequestResponseChannel(amqpConnection, CONNECTION_ID, NAMESPACE, LINK_NAME,
             ENTITY_PATH, session, retryOptions, handlerProvider, reactorProvider, serializer, SenderSettleMode.SETTLED,
             ReceiverSettleMode.SECOND);
         final AmqpException error = new AmqpException(true, "Message", new AmqpErrorContext("some-context"));
